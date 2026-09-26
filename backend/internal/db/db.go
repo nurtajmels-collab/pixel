@@ -185,6 +185,24 @@ func runMigrations(db *sql.DB) error {
 			FOREIGN KEY (user_id) REFERENCES users(id)
 		);`,
 
+		`CREATE TABLE IF NOT EXISTS conversation_messages (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id INTEGER NOT NULL,
+			role TEXT NOT NULL CHECK(role IN ('user', 'assistant')),
+			text TEXT NOT NULL,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (user_id) REFERENCES users(id)
+		);`,
+
+		`CREATE TABLE IF NOT EXISTS assistant_proposals (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id INTEGER NOT NULL,
+			payload TEXT NOT NULL,
+			status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'approved', 'rejected', 'expired')),
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (user_id) REFERENCES users(id)
+		);`,
+
 		`CREATE INDEX IF NOT EXISTS idx_study_sessions_user ON study_sessions(user_id, completed_at);`,
 		`CREATE INDEX IF NOT EXISTS idx_study_assessments_user ON study_assessments(user_id, subject, assessment_type, recorded_at);`,
 		`CREATE INDEX IF NOT EXISTS idx_media_items_user ON media_items(user_id, type);`,
@@ -193,6 +211,8 @@ func runMigrations(db *sql.DB) error {
 		`CREATE INDEX IF NOT EXISTS idx_hobby_sessions_user ON hobby_sessions(user_id, completed_at);`,
 		`CREATE INDEX IF NOT EXISTS idx_activities_user ON activities(user_id, created_at);`,
 		`CREATE INDEX IF NOT EXISTS idx_reminders_pending ON reminders(is_sent, remind_at);`,
+		`CREATE INDEX IF NOT EXISTS idx_conversation_messages_user ON conversation_messages(user_id, created_at);`,
+		`CREATE INDEX IF NOT EXISTS idx_assistant_proposals_pending ON assistant_proposals(user_id, status, created_at);`,
 	}
 
 	for _, q := range queries {

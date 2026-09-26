@@ -22,12 +22,12 @@ func (s *RadarService) CalculateAndStore(userID int64) (*models.RadarScores, err
 	routineScore := s.calcRoutineScore(userID)
 
 	scores := &models.RadarScores{
-		UserID:        userID,
-		StudyScore:    studyScore,
-		SportScore:    sportScore,
-		HobbyScore:    hobbyScore,
-		RoutineScore:  routineScore,
-		CalculatedAt:  time.Now(),
+		UserID:       userID,
+		StudyScore:   studyScore,
+		SportScore:   sportScore,
+		HobbyScore:   hobbyScore,
+		RoutineScore: routineScore,
+		CalculatedAt: time.Now(),
 	}
 
 	_, err := s.db.Exec(
@@ -54,14 +54,18 @@ func (s *RadarService) GetLatest(userID int64) (*models.RadarScores, error) {
 }
 
 func (s *RadarService) calcStudyScore(userID int64) float64 {
-	var totalMinutes int
+	var totalMinutes, activityMinutes int
 	s.db.QueryRow(
-		`SELECT COALESCE(SUM(duration_minutes), 0) FROM study_sessions WHERE user_id = ? AND completed_at >= date('now', '-7 days')`,
+		`SELECT COALESCE(SUM(duration_minutes), 0) FROM study_sessions WHERE user_id = ? AND completed_at >= datetime('now', '-7 days')`,
 		userID,
 	).Scan(&totalMinutes)
+	s.db.QueryRow(
+		`SELECT COALESCE(SUM(duration_hours * 60), 0) FROM activities WHERE user_id = ? AND created_at >= datetime('now', '-7 days') AND lower(category) IN ('study', 'учёба', 'учеба', 'sat', 'ielts', 'nish')`,
+		userID,
+	).Scan(&activityMinutes)
 
 	targetMinutes := 420.0 // 7 hours per week target
-	score := (float64(totalMinutes) / targetMinutes) * 100
+	score := (float64(totalMinutes+activityMinutes) / targetMinutes) * 100
 	if score > 100 {
 		score = 100
 	}
@@ -69,20 +73,24 @@ func (s *RadarService) calcStudyScore(userID int64) float64 {
 }
 
 func (s *RadarService) calcSportScore(userID int64) float64 {
-	var daysActive int
-	var totalMinutes int
+	var daysActive, activityDays int
+	var totalMinutes, activityMinutes int
 	s.db.QueryRow(
-		`SELECT COUNT(DISTINCT date(completed_at)) FROM sport_sessions WHERE user_id = ? AND completed = 1 AND completed_at >= date('now', '-7 days')`,
+		`SELECT COUNT(DISTINCT date(completed_at)) FROM sport_sessions WHERE user_id = ? AND completed = 1 AND completed_at >= datetime('now', '-7 days')`,
 		userID,
 	).Scan(&daysActive)
 	s.db.QueryRow(
-		`SELECT COALESCE(SUM(duration_minutes), 0) FROM sport_sessions WHERE user_id = ? AND completed = 1 AND completed_at >= date('now', '-7 days')`,
+		`SELECT COALESCE(SUM(duration_minutes), 0) FROM sport_sessions WHERE user_id = ? AND completed = 1 AND completed_at >= datetime('now', '-7 days')`,
 		userID,
 	).Scan(&totalMinutes)
+	s.db.QueryRow(
+		`SELECT COUNT(DISTINCT date(created_at)), COALESCE(SUM(duration_hours * 60), 0) FROM activities WHERE user_id = ? AND created_at >= datetime('now', '-7 days') AND lower(category) IN ('sport', 'спорт', 'workout', 'тренировка')`,
+		userID,
+	).Scan(&activityDays, &activityMinutes)
 
 	targetDays := 4.0
 	targetMinutes := 180.0
-	score := ((float64(daysActive)/targetDays)*0.4 + (float64(totalMinutes)/targetMinutes)*0.6) * 100
+	score := ((float64(daysActive+activityDays)/targetDays)*0.4 + (float64(totalMinutes+activityMinutes)/targetMinutes)*0.6) * 100
 	if score > 100 {
 		score = 100
 	}
@@ -92,12 +100,17 @@ func (s *RadarService) calcSportScore(userID int64) float64 {
 func (s *RadarService) calcHobbyScore(userID int64) float64 {
 	var totalSessions int
 	s.db.QueryRow(
-		`SELECT COUNT(*) FROM hobby_sessions WHERE user_id = ? AND completed_at >= date('now', '-7 days')`,
+		`SELECT COUNT(*) FROM hobby_sessions WHERE user_id = ? AND completed_at >= datetime('now', '-7 days')`,
 		userID,
 	).Scan(&totalSessions)
+	var activitySessions int
+	s.db.QueryRow(
+		`SELECT COUNT(*) FROM activities WHERE user_id = ? AND created_at >= datetime('now', '-7 days') AND lower(category) IN ('hobby', 'хобби', 'music', 'музыка', 'guitar', 'гитара', 'rubik', 'кубик')`,
+		userID,
+	).Scan(&activitySessions)
 
 	targetSessions := 7.0 // daily target
-	score := (float64(totalSessions) / targetSessions) * 100
+	score := (float64(totalSessions+activitySessions) / targetSessions) * 100
 	if score > 100 {
 		score = 100
 	}
@@ -107,7 +120,7 @@ func (s *RadarService) calcHobbyScore(userID int64) float64 {
 func (s *RadarService) calcRoutineScore(userID int64) float64 {
 	var sleepDays int
 	s.db.QueryRow(
-		`SELECT COUNT(DISTINCT date(recorded_at)) FROM sleep_records WHERE user_id = ? AND sleep_hours >= 7 AND recorded_at >= date('now', '-7 days')`,
+		`SELECT COUNT(DISTINCT date(recorded_at)) FROM sleep_records WHERE user_id = ? AND sleep_hours >= 7 AND recorded_at >= datetime('now', '-7 days')`,
 		userID,
 	).Scan(&sleepDays)
 
@@ -120,7 +133,7 @@ func (s *RadarService) calcRoutineScore(userID int64) float64 {
 }
 
 func (s *RadarService) GetDashboardData(userID int64) (*models.DashboardData, error) {
-	radar, err := s.GetLatest(userID)
+	radar, err := s.CalculateAndStore(userID)
 	if err != nil {
 		return nil, err
 	}

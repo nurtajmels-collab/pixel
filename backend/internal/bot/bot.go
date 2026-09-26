@@ -144,16 +144,22 @@ func (c *Client) handle(chatID, telegramID int64, username, text string) {
 		return
 	}
 	if !strings.HasPrefix(strings.TrimSpace(text), "/") && c.alfred != nil {
-		response, err := c.alfred.AskAlfred(context.Background(), text)
+		if err := c.alfred.ConfirmLatestProposal(context.Background(), user.ID, text); err == nil {
+			c.send(chatID, "Подтвержденные пункты добавлены в систему, сэр.")
+			_ = c.alfred.RecordConversation(context.Background(), user.ID, text, "Подтвержденные пункты сохранены")
+			return
+		}
+		response, err := c.alfred.AskAlfredForUser(context.Background(), user.ID, text)
 		if err != nil {
 			c.send(chatID, "Сэр, не могу связаться с аналитическим отделом: "+err.Error())
 			return
 		}
-		if err := c.alfred.StoreResponse(context.Background(), user.ID, response); err != nil {
+		if _, err := c.alfred.CreateProposal(context.Background(), user.ID, response); err != nil {
 			c.send(chatID, "Сэр, ответ подготовлен, но сохранить записи не удалось.")
 			return
 		}
-		c.send(chatID, response.AlfredReply)
+		_ = c.alfred.RecordConversation(context.Background(), user.ID, text, response.AlfredReply)
+		c.send(chatID, response.AlfredReply+"\n\n"+assistant.FormatProposal(response))
 		return
 	}
 	switch parts[0] {
