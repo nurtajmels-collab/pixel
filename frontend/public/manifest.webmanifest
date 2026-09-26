@@ -1,0 +1,9 @@
+{
+  "name": "PixelLife Tracker",
+  "short_name": "PixelLife",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f4efe4",
+  "theme_color": "#e84c3d",
+  "description": "Личный трекер ритма, учебы и привычек"
+}
