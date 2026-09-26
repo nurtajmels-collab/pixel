@@ -8,19 +8,21 @@ import (
 	"fmt"
 	"net/http"
 	"time"
-
-	"pixellife-tracker/internal/bot"
 )
 
-type Assistant struct {
-	db   *sql.DB
-	key  string
-	model string
-	bot  *bot.Client
-	http *http.Client
+type MessageSender interface {
+	SendMessage(chatID int64, text string) error
 }
 
-func New(db *sql.DB, key, model string, telegram *bot.Client) *Assistant {
+type Assistant struct {
+	db    *sql.DB
+	key   string
+	model string
+	bot   MessageSender
+	http  *http.Client
+}
+
+func New(db *sql.DB, key, model string, telegram MessageSender) *Assistant {
 	return &Assistant{db: db, key: key, model: model, bot: telegram, http: &http.Client{Timeout: 35 * time.Second}}
 }
 
@@ -102,7 +104,7 @@ func (a *Assistant) askGemini(ctx context.Context, prompt string) string {
 	if err != nil {
 		return ""
 	}
-		request, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://generativelanguage.googleapis.com/v1beta/models/"+a.model+":generateContent?key="+a.key, bytes.NewReader(body))
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://generativelanguage.googleapis.com/v1beta/models/"+a.model+":generateContent?key="+a.key, bytes.NewReader(body))
 	if err != nil {
 		return ""
 	}

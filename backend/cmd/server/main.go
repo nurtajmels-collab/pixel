@@ -74,15 +74,17 @@ func main() {
 	hobbyHandler := handlers.NewHobbyHandler(hobbySvc)
 	f1Handler := handlers.NewF1Handler(f1Svc)
 	dashboardHandler := handlers.NewDashboardHandler(radarSvc)
-	telegram := bot.New(cfg.TelegramToken, userSvc, sleepSvc, sportSvc, mediaSvc)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	alfred := assistant.NewAlfredService(database, cfg.GeminiAPIKey, cfg.GeminiModel)
+	telegram := bot.New(cfg.TelegramToken, userSvc, sleepSvc, sportSvc, mediaSvc, database, alfred)
 	telegramErr := telegram.Validate(ctx)
 	if telegramErr != nil {
 		log.Printf("Telegram disabled: %v", telegramErr)
 	} else {
 		log.Println("Telegram bot connected")
 		go telegram.Start(ctx)
+		go telegram.StartReminderWorker(ctx)
 	}
 	assistantClient := assistant.New(database, cfg.GeminiAPIKey, cfg.GeminiModel, telegram)
 	go assistantClient.Start(ctx)

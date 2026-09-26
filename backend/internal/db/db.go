@@ -163,12 +163,36 @@ func runMigrations(db *sql.DB) error {
 			FOREIGN KEY (user_id) REFERENCES users(id)
 		);`,
 
+		`CREATE TABLE IF NOT EXISTS activities (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id INTEGER NOT NULL,
+			category TEXT NOT NULL,
+			description TEXT NOT NULL,
+			start_time TEXT,
+			end_time TEXT,
+			duration_hours REAL,
+			tags TEXT NOT NULL DEFAULT '[]',
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (user_id) REFERENCES users(id)
+		);`,
+
+		`CREATE TABLE IF NOT EXISTS reminders (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id INTEGER NOT NULL,
+			task TEXT NOT NULL,
+			remind_at DATETIME NOT NULL,
+			is_sent BOOLEAN NOT NULL DEFAULT 0,
+			FOREIGN KEY (user_id) REFERENCES users(id)
+		);`,
+
 		`CREATE INDEX IF NOT EXISTS idx_study_sessions_user ON study_sessions(user_id, completed_at);`,
 		`CREATE INDEX IF NOT EXISTS idx_study_assessments_user ON study_assessments(user_id, subject, assessment_type, recorded_at);`,
 		`CREATE INDEX IF NOT EXISTS idx_media_items_user ON media_items(user_id, type);`,
 		`CREATE INDEX IF NOT EXISTS idx_sport_sessions_user ON sport_sessions(user_id, completed_at);`,
 		`CREATE INDEX IF NOT EXISTS idx_sleep_records_user ON sleep_records(user_id, recorded_at);`,
 		`CREATE INDEX IF NOT EXISTS idx_hobby_sessions_user ON hobby_sessions(user_id, completed_at);`,
+		`CREATE INDEX IF NOT EXISTS idx_activities_user ON activities(user_id, created_at);`,
+		`CREATE INDEX IF NOT EXISTS idx_reminders_pending ON reminders(is_sent, remind_at);`,
 	}
 
 	for _, q := range queries {

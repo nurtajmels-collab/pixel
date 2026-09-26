@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"pixellife-tracker/internal/assistant"
 	"pixellife-tracker/internal/models"
 	"pixellife-tracker/internal/services"
 )
@@ -21,6 +23,8 @@ type Client struct {
 	sleep   *services.SleepService
 	sport   *services.SportService
 	media   *services.MediaService
+	db      *sql.DB
+	alfred  *assistant.AlfredService
 	http    *http.Client
 }
 
@@ -57,7 +61,9 @@ func (c *Client) Validate(ctx context.Context) error {
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
 		return fmt.Errorf("telegram getMe returned HTTP %d", response.StatusCode)
 	}
-	var result struct { OK bool `json:"ok"` }
+	var result struct {
+		OK bool `json:"ok"`
+	}
 	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
 		return err
 	}
@@ -67,8 +73,8 @@ func (c *Client) Validate(ctx context.Context) error {
 	return nil
 }
 
-func New(token string, users *services.UserService, sleep *services.SleepService, sport *services.SportService, media *services.MediaService) *Client {
-	return &Client{token: token, baseURL: "https://api.telegram.org/bot" + token, users: users, sleep: sleep, sport: sport, media: media, http: &http.Client{Timeout: 15 * time.Second}}
+func New(token string, users *services.UserService, sleep *services.SleepService, sport *services.SportService, media *services.MediaService, database *sql.DB, alfred *assistant.AlfredService) *Client {
+	return &Client{token: token, baseURL: "https://api.telegram.org/bot" + token, users: users, sleep: sleep, sport: sport, media: media, db: database, alfred: alfred, http: &http.Client{Timeout: 15 * time.Second}}
 }
 
 func (c *Client) Start(ctx context.Context) {
@@ -137,6 +143,19 @@ func (c *Client) handle(chatID, telegramID int64, username, text string) {
 	if len(parts) == 0 {
 		return
 	}
+	if !strings.HasPrefix(strings.TrimSpace(text), "/") && c.alfred != nil {
+		response, err := c.alfred.AskAlfred(context.Background(), text)
+		if err != nil {
+			c.send(chatID, "Сэр, не могу связаться с аналитическим отделом: "+err.Error())
+			return
+		}
+		if err := c.alfred.StoreResponse(context.Background(), user.ID, response); err != nil {
+			c.send(chatID, "Сэр, ответ подготовлен, но сохранить записи не удалось.")
+			return
+		}
+		c.send(chatID, response.AlfredReply)
+		return
+	}
 	switch parts[0] {
 	case "/start":
 		c.send(chatID, "PIXELLIFE ONLINE\n\nКоманды:\n/sleep 7.5\n/sport\n/shelf название")
@@ -176,4 +195,50 @@ func (c *Client) SendMessage(chatID int64, text string) error { return c.send(ch
 func (c *Client) send(chatID int64, text string) error {
 	_, err := c.http.PostForm(c.baseURL+"/sendMessage", url.Values{"chat_id": {strconv.FormatInt(chatID, 10)}, "text": {text}})
 	return err
+}
+
+func (c *Client) StartReminderWorker(ctx context.Context) {
+	if c.db == nil || c.token == "" {
+		return
+	}
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	c.processReminders(ctx)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			c.processReminders(ctx)
+		}
+	}
+}
+
+func (c *Client) processReminders(ctx context.Context) {
+	rows, err := c.db.QueryContext(ctx, `SELECT reminders.id, reminders.task, users.telegram_id
+		FROM reminders JOIN users ON users.id = reminders.user_id
+		WHERE reminders.is_sent = 0 AND datetime(reminders.remind_at) <= CURRENT_TIMESTAMP`)
+	if err != nil {
+		return
+	}
+	type pendingReminder struct {
+		id         int64
+		task       string
+		telegramID int64
+	}
+	var pending []pendingReminder
+	for rows.Next() {
+		var reminder pendingReminder
+		if rows.Scan(&reminder.id, &reminder.task, &reminder.telegramID) != nil {
+			continue
+		}
+		pending = append(pending, reminder)
+	}
+	rows.Close()
+	for _, reminder := range pending {
+		if err := c.SendMessage(reminder.telegramID, "Сэр, напоминаю: "+reminder.task); err != nil {
+			continue
+		}
+		_, _ = c.db.ExecContext(ctx, `UPDATE reminders SET is_sent = 1 WHERE id = ? AND is_sent = 0`, reminder.id)
+	}
 }
