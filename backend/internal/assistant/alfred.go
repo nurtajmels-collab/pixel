@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"pixellife-tracker/internal/models"
 )
 
 var ErrNoPendingProposal = errors.New("no pending proposal")
@@ -51,6 +53,7 @@ const alfredSystemPrompt = `Ты — Альфред Пенниуорт, безу
 - Никогда не описывай в alfred_reply сон, streak, активность или reminder как предложение, если соответствующий объект отсутствует в JSON.
 - Если в сообщении есть факт сна, заполни sleep_record даже если время отбоя или подъёма неизвестно: укажи sleep_hours, а неизвестные bedtime и wake_time оставь пустыми строками.
 - Если пользователь сообщает о регулярной цели или хочет начать занятие, добавь каждую отдельную цель в new_hobby_streaks. Не прячь цели только в alfred_reply.
+- Если пользователь хочет сохранить книгу, сериал, песню или курс, добавь его в new_media_items. Не прячь media-предложение только в alfred_reply.
 - Если ты показываешь в alfred_reply нумерованный пункт для подтверждения, этот пункт обязательно должен существовать в tracked_activities, sleep_record, new_hobby_streaks или new_reminders.
 - Сначала сформируй структурированные поля, затем напиши alfred_reply только на их основе.
 
@@ -62,6 +65,7 @@ type AlfredResponse struct {
 	NewReminders      []NewReminder     `json:"new_reminders"`
 	SleepRecord       *SleepRecordInput `json:"sleep_record"`
 	NewHobbyStreaks   []NewHobbyStreak  `json:"new_hobby_streaks"`
+	NewMediaItems     []NewMediaItem    `json:"new_media_items"`
 }
 
 type TrackedActivity struct {
@@ -86,6 +90,13 @@ type SleepRecordInput struct {
 
 type NewHobbyStreak struct {
 	Name string `json:"name"`
+}
+
+type NewMediaItem struct {
+	Type   string `json:"type"`
+	Title  string `json:"title"`
+	Status string `json:"status"`
+	Notes  string `json:"notes"`
 }
 
 type AlfredService struct {
@@ -167,7 +178,10 @@ func (a *AlfredService) ask(ctx context.Context, userText string) (*AlfredRespon
 					"new_hobby_streaks": map[string]any{"type": "ARRAY", "items": map[string]any{"type": "OBJECT", "properties": map[string]any{
 						"name": map[string]string{"type": "STRING"},
 					}, "required": []string{"name"}}},
-				}, "required": []string{"alfred_reply", "tracked_activities", "new_reminders", "sleep_record", "new_hobby_streaks"},
+					"new_media_items": map[string]any{"type": "ARRAY", "items": map[string]any{"type": "OBJECT", "properties": map[string]any{
+						"type": map[string]string{"type": "STRING"}, "title": map[string]string{"type": "STRING"}, "status": map[string]string{"type": "STRING"}, "notes": map[string]string{"type": "STRING"},
+					}, "required": []string{"type", "title", "status", "notes"}}},
+				}, "required": []string{"alfred_reply", "tracked_activities", "new_reminders", "sleep_record", "new_hobby_streaks", "new_media_items"},
 			},
 		},
 	}
@@ -305,6 +319,12 @@ func selectProposalItems(original *AlfredResponse, selection string) (*AlfredRes
 			confirmed.NewHobbyStreaks = append(confirmed.NewHobbyStreaks, hobby)
 		}
 	}
+	for _, media := range original.NewMediaItems {
+		item++
+		if selected[item] {
+			confirmed.NewMediaItems = append(confirmed.NewMediaItems, media)
+		}
+	}
 	if original.SleepRecord != nil {
 		item++
 		if selected[item] {
@@ -321,7 +341,7 @@ func selectProposalItems(original *AlfredResponse, selection string) (*AlfredRes
 }
 
 func proposalItemCount(response *AlfredResponse) int {
-	return len(response.TrackedActivities) + len(response.NewHobbyStreaks) + boolToInt(response.SleepRecord != nil) + len(response.NewReminders)
+	return len(response.TrackedActivities) + len(response.NewHobbyStreaks) + len(response.NewMediaItems) + boolToInt(response.SleepRecord != nil) + len(response.NewReminders)
 }
 
 func boolToInt(value bool) int {
@@ -341,6 +361,10 @@ func FormatProposal(response *AlfredResponse) string {
 	for _, hobby := range response.NewHobbyStreaks {
 		item++
 		lines = append(lines, fmt.Sprintf("%d. Стрик: %s", item, hobby.Name))
+	}
+	for _, media := range response.NewMediaItems {
+		item++
+		lines = append(lines, fmt.Sprintf("%d. Медиа-полка: %s", item, media.Title))
 	}
 	if response.SleepRecord != nil {
 		item++
@@ -399,6 +423,23 @@ func (a *AlfredService) StoreResponse(ctx context.Context, userID int64, respons
 		_, err = tx.ExecContext(ctx, `INSERT INTO hobby_streaks (user_id, name) VALUES (?, ?)`, userID, strings.TrimSpace(hobby.Name))
 		if err != nil {
 			return fmt.Errorf("save hobby streak: %w", err)
+		}
+	}
+	for _, media := range response.NewMediaItems {
+		if strings.TrimSpace(media.Title) == "" {
+			continue
+		}
+		mediaType := media.Type
+		if mediaType == "" {
+			mediaType = models.MediaTypeSeries
+		}
+		mediaStatus := media.Status
+		if mediaStatus == "" {
+			mediaStatus = models.MediaStatusPlanned
+		}
+		_, err = tx.ExecContext(ctx, `INSERT INTO media_items (user_id, type, title, status, notes) VALUES (?, ?, ?, ?, ?)`, userID, mediaType, strings.TrimSpace(media.Title), mediaStatus, media.Notes)
+		if err != nil {
+			return fmt.Errorf("save media item: %w", err)
 		}
 	}
 	return tx.Commit()

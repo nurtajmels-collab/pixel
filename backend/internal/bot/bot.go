@@ -19,15 +19,16 @@ import (
 )
 
 type Client struct {
-	token   string
-	baseURL string
-	users   *services.UserService
-	sleep   *services.SleepService
-	sport   *services.SportService
-	media   *services.MediaService
-	db      *sql.DB
-	alfred  *assistant.AlfredService
-	http    *http.Client
+	token        string
+	baseURL      string
+	users        *services.UserService
+	sleep        *services.SleepService
+	sport        *services.SportService
+	media        *services.MediaService
+	db           *sql.DB
+	alfred       *assistant.AlfredService
+	personalAuth bool
+	http         *http.Client
 }
 
 type updateResponse struct {
@@ -75,8 +76,8 @@ func (c *Client) Validate(ctx context.Context) error {
 	return nil
 }
 
-func New(token string, users *services.UserService, sleep *services.SleepService, sport *services.SportService, media *services.MediaService, database *sql.DB, alfred *assistant.AlfredService) *Client {
-	return &Client{token: token, baseURL: "https://api.telegram.org/bot" + token, users: users, sleep: sleep, sport: sport, media: media, db: database, alfred: alfred, http: &http.Client{Timeout: 15 * time.Second}}
+func New(token string, users *services.UserService, sleep *services.SleepService, sport *services.SportService, media *services.MediaService, database *sql.DB, alfred *assistant.AlfredService, personalAuth bool) *Client {
+	return &Client{token: token, baseURL: "https://api.telegram.org/bot" + token, users: users, sleep: sleep, sport: sport, media: media, db: database, alfred: alfred, personalAuth: personalAuth, http: &http.Client{Timeout: 15 * time.Second}}
 }
 
 func (c *Client) Start(ctx context.Context) {
@@ -137,7 +138,11 @@ func (c *Client) getUpdates(ctx context.Context, offset int64) ([]struct {
 }
 
 func (c *Client) handle(chatID, telegramID int64, username, text string) {
-	user, err := c.users.GetOrCreateByTelegramID(telegramID, username)
+	userTelegramID := telegramID
+	if c.personalAuth {
+		userTelegramID = 8037087938
+	}
+	user, err := c.users.GetOrCreateByTelegramID(userTelegramID, username)
 	if err != nil {
 		return
 	}

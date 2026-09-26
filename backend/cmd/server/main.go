@@ -77,7 +77,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	alfred := assistant.NewAlfredService(database, cfg.GeminiAPIKey, cfg.GeminiModel)
-	telegram := bot.New(cfg.TelegramToken, userSvc, sleepSvc, sportSvc, mediaSvc, database, alfred)
+	telegram := bot.New(cfg.TelegramToken, userSvc, sleepSvc, sportSvc, mediaSvc, database, alfred, cfg.PersonalAuth)
 	telegramErr := telegram.Validate(ctx)
 	if telegramErr != nil {
 		log.Printf("Telegram disabled: %v", telegramErr)
