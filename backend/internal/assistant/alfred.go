@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -12,6 +13,8 @@ import (
 	"strings"
 	"time"
 )
+
+var ErrNoPendingProposal = errors.New("no pending proposal")
 
 const alfredSystemPrompt = `Ты — Альфред Пенниуорт, безупречно вежливый дворецкий и строгий наставник Мэлса.
 
@@ -42,6 +45,14 @@ const alfredSystemPrompt = `Ты — Альфред Пенниуорт, безу
 - Не повторяй общий список SAT, школы и программирования без связи с текущим сообщением.
 
 Стиль: британская вежливость, лёгкая ирония, уважение, без заискивания и чрезмерно длинных ответов.
+
+Строгое правило синхронизации JSON:
+- Массивы и объекты JSON являются единственным источником предложений для приложения.
+- Никогда не описывай в alfred_reply сон, streak, активность или reminder как предложение, если соответствующий объект отсутствует в JSON.
+- Если в сообщении есть факт сна, заполни sleep_record даже если время отбоя или подъёма неизвестно: укажи sleep_hours, а неизвестные bedtime и wake_time оставь пустыми строками.
+- Если пользователь сообщает о регулярной цели или хочет начать занятие, добавь каждую отдельную цель в new_hobby_streaks. Не прячь цели только в alfred_reply.
+- Если ты показываешь в alfred_reply нумерованный пункт для подтверждения, этот пункт обязательно должен существовать в tracked_activities, sleep_record, new_hobby_streaks или new_reminders.
+- Сначала сформируй структурированные поля, затем напиши alfred_reply только на их основе.
 
 Отвечай строго в JSON согласно предоставленной схеме.`
 
@@ -243,7 +254,7 @@ func (a *AlfredService) ConfirmLatestProposal(ctx context.Context, userID int64,
 	var payload string
 	err := a.db.QueryRowContext(ctx, `SELECT id, payload FROM assistant_proposals WHERE user_id = ? AND status = 'pending' ORDER BY id DESC LIMIT 1`, userID).Scan(&proposalID, &payload)
 	if err == sql.ErrNoRows {
-		return fmt.Errorf("no pending proposal")
+		return ErrNoPendingProposal
 	}
 	if err != nil {
 		return err

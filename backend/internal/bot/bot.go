@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -147,6 +149,10 @@ func (c *Client) handle(chatID, telegramID int64, username, text string) {
 		if err := c.alfred.ConfirmLatestProposal(context.Background(), user.ID, text); err == nil {
 			c.send(chatID, "Подтвержденные пункты добавлены в систему, сэр.")
 			_ = c.alfred.RecordConversation(context.Background(), user.ID, text, "Подтвержденные пункты сохранены")
+			return
+		} else if !errors.Is(err, assistant.ErrNoPendingProposal) && !strings.Contains(err.Error(), "укажите номера предложений") {
+			log.Printf("assistant proposal confirmation failed for user %d: %v", user.ID, err)
+			c.send(chatID, "Сэр, не удалось сохранить подтвержденные данные: "+err.Error())
 			return
 		}
 		response, err := c.alfred.AskAlfredForUser(context.Background(), user.ID, text)
